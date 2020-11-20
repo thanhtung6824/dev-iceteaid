@@ -1,35 +1,66 @@
-import React, { useState, useEffect, useContext, createContext } from 'react';
-import { useLocalStorage } from './useLocalStorage';
+import React, { useMemo, useContext, createContext, useState, useEffect, useCallback } from 'react';
+import { getMetaData } from '../services';
+import { createPersistedState } from './useLocalStorage';
 
-const authContext = createContext();
+type ProvideAuth = {
+    isAuthenticated: boolean;
+    getUser: () => Promise<any>;
+    logOut: () => void;
+};
+
+const authContext = createContext<ProvideAuth>({
+    isAuthenticated: false,
+    getUser: () => Promise.resolve(),
+    logOut: () => {
+        console.log('logout');
+    },
+});
 
 // Provider component that wraps your app and makes auth object ...
 // ... available to any child component that calls useAuth().
-export function ProvideAuth({ children }) {
-    const auth = useProvideAuth();
-    return <authContext.Provider value={auth}>{children}</authContext.Provider>;
-}
+export const ProvideAuth = ({ children }: { children: React.ReactNode }): JSX.Element => {
+    const { isAuthenticated, getUser, logOut } = useProvideAuth();
+    const memoAuth = useMemo(() => {
+        return { isAuthenticated, getUser, logOut };
+    }, [isAuthenticated, getUser, logOut]);
+    return <authContext.Provider value={memoAuth}>{children}</authContext.Provider>;
+};
 
+ProvideAuth.whyDidYouRender = true;
 // Hook for child components to get the auth object ...
 // ... and re-render when it changes.
-export const useAuth = () => {
+export const useAuth = (): ProvideAuth => {
     return useContext(authContext);
 };
 
-export function useProvideAuth(): { isAuthenticated: boolean } {
-    const [stringToken] = useLocalStorage('token', '');
+const useTokenState = createPersistedState('token');
+
+function useProvideAuth(): ProvideAuth {
+    const [token, setToken] = useTokenState({
+        token: '',
+        expires: new Date(),
+    });
     const [isAuthenticated, setIsAuthenticated] = useState(false);
 
     useEffect(() => {
-        const now = Math.floor(Date.now() / 1000);
-        const token = JSON.parse(stringToken);
-        console.log('now', !stringToken || now > token.expires);
-        console.log('token', token);
-        if (!stringToken || now > token.expires) {
-            setIsAuthenticated(false);
+        const now = Date.now();
+        if (token) {
+            if (isAuthenticated && now <= new Date(token.expires).getTime()) {
+                return;
+            }
+            return setIsAuthenticated(now <= new Date(token.expires).getTime());
         }
-        setIsAuthenticated(true);
-    }, [stringToken]);
+        return setIsAuthenticated(false);
+    }, [token.token]);
 
-    return { isAuthenticated };
+    const getUser = useCallback(async () => {
+        return getMetaData();
+    }, []);
+
+    const logOut = useCallback(() => {
+        setToken({ token: '', expires: new Date() });
+        document.body.className = document.body.className.replace('dark-mode', '');
+    }, []);
+
+    return { isAuthenticated, getUser, logOut };
 }

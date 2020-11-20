@@ -1,1 +1,0 @@
-export type ReturnType<T> = Promise<T> | Error
